@@ -1,0 +1,33 @@
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "RUF",  # ruff-specific
+    "D100", # docstring in public module
+    "D103", # docstring in public function
+    "D403", # Capitalize 1st word of docstring
+]
+
+ignore = [
+    "D203",
+    "D213",
+    "D212",
+    "D205",
+    "D415",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
