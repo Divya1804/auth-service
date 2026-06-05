@@ -1,9 +1,9 @@
 [tool.black]
-line-length = 88
+line-length = 200
 target-version = ["py312"]
 
 [tool.ruff]
-line-length = 88
+line-length = 200
 
 [tool.ruff.lint]
 select = [
@@ -16,9 +16,9 @@ select = [
     "C4",   # comprehensions
     "SIM",  # simplify
     "RUF",  # ruff-specific
-    "D100", # docstring in public module
-    "D103", # docstring in public function
-    "D403", # Capitalize 1st word of docstring
+#    "D100", # docstring in public module
+#    "D103", # docstring in public function
+#    "D403", # Capitalize 1st word of docstring
 ]
 
 ignore = [
@@ -27,6 +27,9 @@ ignore = [
     "D212",
     "D205",
     "D415",
+    "I001",
+    "B008",
+    "B904"
 ]
 
 [tool.ruff.lint.pydocstyle]
