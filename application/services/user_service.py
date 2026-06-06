@@ -35,7 +35,7 @@ class UserService:
         device_name: str | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
-    ) -> Token:
+    ) -> tuple[Token, str]:
         token_id = uuid.uuid4()
         expires_at = get_ist_now() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
@@ -60,7 +60,8 @@ class UserService:
             token_id=token_id,
         )
 
-        return Token(access_token=access_token_str, refresh_token=refresh_token_str, token_type="bearer")
+        token = Token(access_token=access_token_str, token_type="bearer")
+        return token, refresh_token_str
 
     @staticmethod
     def register_user(
@@ -69,7 +70,7 @@ class UserService:
         device_name: str | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
-    ) -> UserResponse:
+    ) -> tuple[UserResponse, str]:
         # 1. Check for email duplication
         if UserRepository.get_user_by_email(db, email=user_in.email_id):
             collector_logger.error(f"Registration failed: Email {user_in.email_id} already exists.")
@@ -88,7 +89,7 @@ class UserService:
         collector_logger.info(f"User successfully registered: {new_user.email_id}")
 
         # 5. Generate Access & Refresh Tokens
-        token = UserService._create_token_pair(
+        token, refresh_token_str = UserService._create_token_pair(
             db=db,
             user=new_user,
             tenant_id=new_user.default_tenant,
@@ -101,7 +102,7 @@ class UserService:
         base_user = UserBase.model_validate(new_user)
         response = UserResponse(**base_user.model_dump(), tokens=token)
 
-        return response
+        return response, refresh_token_str
 
     @staticmethod
     def authenticate_user(
@@ -110,7 +111,7 @@ class UserService:
         device_name: str | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
-    ) -> UserResponse:
+    ) -> tuple[UserResponse, str]:
         # 1. Look up user by email
         user = UserRepository.get_user_by_email(db, email=user_login.email_id)
         if not user:
@@ -123,7 +124,7 @@ class UserService:
             raise InvalidCredentialsException("Invalid email or password")
 
         # 3. Generate Access & Refresh Tokens
-        token = UserService._create_token_pair(
+        token, refresh_token_str = UserService._create_token_pair(
             db=db,
             user=user,
             tenant_id=user.default_tenant,
@@ -137,7 +138,7 @@ class UserService:
         response = UserResponse(**base_user.model_dump(), tokens=token)
 
         collector_logger.info(f"User logged in successfully: {user.email_id}")
-        return response
+        return response, refresh_token_str
 
     @staticmethod
     def rotate_refresh_token(
@@ -146,7 +147,7 @@ class UserService:
         device_name: str | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
-    ) -> UserResponse:
+    ) -> tuple[UserResponse, str]:
         try:
             payload = jwt.decode(refresh_token_str, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
 
@@ -209,7 +210,7 @@ class UserService:
         tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else user.default_tenant
 
         # Generate new token pair
-        new_tokens = UserService._create_token_pair(
+        token, new_refresh_token_str = UserService._create_token_pair(
             db=db,
             user=user,
             tenant_id=tenant_id,
@@ -219,10 +220,10 @@ class UserService:
         )
 
         base_user = UserBase.model_validate(user)
-        response = UserResponse(**base_user.model_dump(), tokens=new_tokens)
+        response = UserResponse(**base_user.model_dump(), tokens=token)
 
         collector_logger.info(f"Successfully rotated refresh token for user: {user.email_id}")
-        return response
+        return response, new_refresh_token_str
 
     @staticmethod
     def revoke_refresh_token(db: Session, refresh_token_str: str) -> None:
