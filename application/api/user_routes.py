@@ -1,14 +1,27 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
 from application.db.dependencies import get_db
-from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserBase, TokenRefreshRequest
+from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserBase
 from application.services.user_service import UserService
-from application.utils.response import success_response
+from application.utils.response import success_response, error_response
 from application.api.dependencies import get_current_user
 from application.models.users import User
+from application.core.config import settings
+from application.core.exceptions import UnauthorizedUserException
 
 router = APIRouter(prefix="/users")
+
+
+def set_refresh_cookie(response: Response, refresh_token: str):
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+    )
 
 
 @router.post("/signup")
@@ -17,8 +30,10 @@ def register(request: Request, user_in: UserCreate, db: Session = Depends(get_db
     user_agent = request.headers.get("user-agent")
     device_name = request.headers.get("x-device-name")
 
-    result = UserService.register_user(db, user_in, device_name=device_name, ip_address=ip_address, user_agent=user_agent)
-    return success_response(201, "User registered successfully", data=result)
+    result, refresh_token = UserService.register_user(db, user_in, device_name=device_name, ip_address=ip_address, user_agent=user_agent)
+    response = success_response(201, "User registered successfully", data=result)
+    set_refresh_cookie(response, refresh_token)
+    return response
 
 
 @router.post("/login")
@@ -27,30 +42,46 @@ def login(request: Request, user_login: UserLogin, db: Session = Depends(get_db)
     user_agent = request.headers.get("user-agent")
     device_name = request.headers.get("x-device-name")
 
-    result = UserService.authenticate_user(db, user_login, device_name=device_name, ip_address=ip_address, user_agent=user_agent)
-    return success_response(200, "Login successful", data=result)
+    result, refresh_token = UserService.authenticate_user(db, user_login, device_name=device_name, ip_address=ip_address, user_agent=user_agent)
+    response = success_response(200, "Login successful", data=result)
+    set_refresh_cookie(response, refresh_token)
+    return response
 
 
 @router.post("/refresh")
-def refresh_token(request: Request, body: TokenRefreshRequest, db: Session = Depends(get_db)):
+def refresh_token(request: Request, db: Session = Depends(get_db)):
+    refresh_token_str = request.cookies.get("refresh_token")
+    if not refresh_token_str:
+        raise UnauthorizedUserException(message="Authentication required", error_message="Refresh token is missing")
+
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
     device_name = request.headers.get("x-device-name")
 
-    result = UserService.rotate_refresh_token(
+    result, new_refresh_token = UserService.rotate_refresh_token(
         db,
-        refresh_token_str=body.refresh_token,
+        refresh_token_str=refresh_token_str,
         device_name=device_name,
         ip_address=ip_address,
         user_agent=user_agent,
     )
-    return success_response(200, "Token refreshed successfully", data=result)
+    response = success_response(200, "Token refreshed successfully", data=result)
+    set_refresh_cookie(response, new_refresh_token)
+    return response
 
 
 @router.post("/logout")
-def logout(body: TokenRefreshRequest, db: Session = Depends(get_db)):
-    UserService.revoke_refresh_token(db, refresh_token_str=body.refresh_token)
-    return success_response(200, "Logout successful")
+def logout(request: Request, db: Session = Depends(get_db)):
+    refresh_token_str = request.cookies.get("refresh_token")
+
+    if not refresh_token_str:
+        return error_response(400, "Already logged out", "BAD_REQUEST", "User already logged out successfully")
+
+    response = success_response(200, "Logout successful")
+    UserService.revoke_refresh_token(db, refresh_token_str=refresh_token_str)
+
+    response.delete_cookie(key="refresh_token")
+    return response
 
 
 @router.get("/me")
