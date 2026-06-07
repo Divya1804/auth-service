@@ -1,6 +1,7 @@
 import bcrypt
 import hashlib
 import jwt
+import secrets
 from datetime import timedelta
 import uuid
 from application.core.config import settings
@@ -45,3 +46,8 @@ def create_refresh_token(user_id: uuid.UUID, token_id: uuid.UUID, tenant_id: uui
 def hash_token_string(token: str) -> str:
     """Compute SHA-256 hash of a token string for secure DB storage."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def generate_verification_token() -> str:
+    """Generate a secure, URL-safe random string for token verification."""
+    return secrets.token_urlsafe(32)

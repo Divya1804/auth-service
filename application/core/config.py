@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     AVATAR_SEEDS: str
     COOKIE_SECURE: bool
     COOKIE_SAMESITE: str
+    RESEND_API_KEY: str
+    RESEND_FROM_EMAIL: str
 
     model_config = SettingsConfigDict(env_file=".env")
 
