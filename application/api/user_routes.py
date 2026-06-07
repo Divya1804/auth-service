@@ -36,9 +36,7 @@ def register(
     user_agent = request.headers.get("user-agent")
     device_name = request.headers.get("x-device-name")
 
-    result, refresh_token, raw_token = UserService.register_user(
-        db, user_in, device_name=device_name, ip_address=ip_address, user_agent=user_agent
-    )
+    result, refresh_token, raw_token = UserService.register_user(db, user_in, device_name=device_name, ip_address=ip_address, user_agent=user_agent)
 
     # Construct verification URL
     base_url = str(request.base_url).rstrip("/")
@@ -63,9 +61,7 @@ def login(request: Request, user_login: UserLogin, db: Session = Depends(get_db)
     user_agent = request.headers.get("user-agent")
     device_name = request.headers.get("x-device-name")
 
-    result, refresh_token = UserService.authenticate_user(
-        db, user_login, device_name=device_name, ip_address=ip_address, user_agent=user_agent
-    )
+    result, refresh_token = UserService.authenticate_user(db, user_login, device_name=device_name, ip_address=ip_address, user_agent=user_agent)
     response = success_response(200, "Login successful", data=result)
     set_refresh_cookie(response, refresh_token)
     return response
@@ -118,9 +114,7 @@ def get_my_profile(current_user: User = Depends(get_current_user)):
 
 
 @router.patch("/me")
-def update_my_profile(
-    user_update: UserUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
-):
+def update_my_profile(user_update: UserUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     updated_user = UserService.update_user_profile(db, current_user.user_id, user_update)
     safe_profile = UserBase.model_validate(updated_user)
     return success_response(200, "Profile updated successfully", data=safe_profile)

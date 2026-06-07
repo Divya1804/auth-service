@@ -32,9 +32,7 @@ class VerificationTokenRepository:
 
     @staticmethod
     def get_token_by_hash(db: Session, token_hash: str, purpose: TokenPurpose) -> VerificationToken | None:
-        stmt = select(VerificationToken).where(
-            and_(VerificationToken.token_hash == token_hash, VerificationToken.purpose == purpose)
-        )
+        stmt = select(VerificationToken).where(and_(VerificationToken.token_hash == token_hash, VerificationToken.purpose == purpose))
         return db.execute(stmt).scalars().first()
 
     @staticmethod
