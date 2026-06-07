@@ -1,5 +1,5 @@
 import random
-from pydantic import BaseModel, EmailStr, ConfigDict, Field
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
 
 from application.core.config import settings
 
@@ -56,3 +56,27 @@ class Token(BaseModel):
 
 class UserResponse(UserBase):
     tokens: Token
+
+
+class ForgotPasswordRequest(BaseModel):
+    email_id: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        if not any(char.isupper() for char in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(char.islower() for char in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(char.isdigit() for char in v):
+            raise ValueError("Password must contain at least one number")
+        if not any(char in "!@#$%^&*()_+-=[]{}|;:'\",.<>?/`~" for char in v):
+            raise ValueError("Password must contain at least one special character")
+        return v

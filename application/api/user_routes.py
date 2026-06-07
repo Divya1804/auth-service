@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request, Response, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from application.db.dependencies import get_db
-from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserBase
+from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserBase, ForgotPasswordRequest, ResetPasswordRequest
 from application.services.user_service import UserService
 from application.utils.response import success_response
 from application.api.dependencies import get_current_user
@@ -118,3 +118,15 @@ def update_my_profile(user_update: UserUpdate, db: Session = Depends(get_db), cu
     updated_user = UserService.update_user_profile(db, current_user.user_id, user_update)
     safe_profile = UserBase.model_validate(updated_user)
     return success_response(200, "Profile updated successfully", data=safe_profile)
+
+
+@router.post("/forgot-password")
+def forgot_password(request: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    UserService.forgot_password(db, request, background_tasks)
+    return success_response(200, "If your email is registered, a password reset link has been sent.")
+
+
+@router.post("/reset-password")
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    UserService.reset_password(db, request)
+    return success_response(200, "Password reset successfully. You can now log in with your new password.")
