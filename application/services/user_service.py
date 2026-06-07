@@ -162,9 +162,7 @@ class UserService:
     @staticmethod
     def verify_user_email(db: Session, token_str: str) -> None:
         token_hash = hash_token_string(token_str)
-        db_token = VerificationTokenRepository.get_token_by_hash(
-            db, token_hash=token_hash, purpose=TokenPurpose.EMAIL_VERIFICATION
-        )
+        db_token = VerificationTokenRepository.get_token_by_hash(db, token_hash=token_hash, purpose=TokenPurpose.EMAIL_VERIFICATION)
 
         if not db_token:
             collector_logger.error("Email verification failed: Token not found.")

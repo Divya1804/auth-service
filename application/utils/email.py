@@ -7,8 +7,6 @@ from application.utils.logger import collector_logger
 from application.utils.time_ist import get_ist_now
 
 
-
-
 class EmailService:
     @staticmethod
     def _send_email(to_email: EmailStr, subject: str, html_content: str):
@@ -22,8 +20,7 @@ class EmailService:
             response = resend.Emails.send(params)
             collector_logger.info(f"Email successfully sent to {to_email}. ID: {response.get('id')}")
         except Exception as e:
-            collector_logger.error(f"Failed to send email to {to_email}: {str(e)}")
-
+            collector_logger.error(f"Failed to send email to {to_email}: {e!s}")
 
     @classmethod
     def send_verification_email(cls, email_to: EmailStr, username: str, verification_url: str):
