@@ -1,5 +1,6 @@
 from uuid import UUID
 from datetime import datetime
+from pydantic import EmailStr
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_
 from sqlalchemy.sql import expression
@@ -13,7 +14,7 @@ class VerificationTokenRepository:
     def create_verification_token(
         db: Session,
         user_id: UUID,
-        email_id: str,
+        email_id: EmailStr,
         token_hash: str,
         purpose: TokenPurpose,
         expires_at: datetime,

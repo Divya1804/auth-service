@@ -9,7 +9,7 @@ from application.repositories.refresh_token_repo import RefreshTokenRepository
 from application.repositories.verification_token_repo import VerificationTokenRepository
 from application.models.verification_tokens import TokenPurpose
 from application.models.users import UserStatus
-from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserResponse, Token, UserBase, ForgotPasswordRequest, ResetPasswordRequest
+from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserResponse, Token, UserBase, ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest, ChangeEmailRequest
 from fastapi import BackgroundTasks
 from application.utils.email import EmailService
 from application.utils.security import (
@@ -377,3 +377,70 @@ class UserService:
         RefreshTokenRepository.revoke_all_user_tokens(db, user.user_id)
 
         collector_logger.info(f"Password reset successfully for user: {user.email_id}. All sessions revoked.")
+
+    @staticmethod
+    def change_password(db: Session, user_id: UUID, request: ChangePasswordRequest):
+        user = UserRepository.get_user_by_id(db, user_id)
+        if not user:
+            raise UserNotFoundException("User not found")
+
+        # Verify old password
+        if not verify_password(request.old_password, user.password):
+            collector_logger.error(f"Change password failed: Incorrect old password for {user.email_id}.")
+            raise InvalidCredentialsException("Incorrect old password")
+
+        # if request.new_password != request.confirm_new_password:
+        #     collector_logger.error(f"New password and confirm new password is not matching for {user.email_id}")
+        #     raise BadRequestException("Invalid new password or confirm new password")
+
+        # Update with new password
+        new_password_hash = get_password_hash(request.new_password)
+        UserRepository.update_user(db, user, {"password": new_password_hash})
+
+        # Revoke all active refresh tokens for security
+        RefreshTokenRepository.revoke_all_user_tokens(db, user.user_id)
+
+        collector_logger.info(f"Password changed successfully for user: {user.email_id}. All sessions revoked.")
+
+    @staticmethod
+    def change_email(db: Session, user_id: UUID, request: ChangeEmailRequest, background_tasks: BackgroundTasks, base_url: str):
+        user = UserRepository.get_user_by_id(db, user_id)
+        if not user:
+            raise UserNotFoundException("User not found")
+
+        new_email = request.new_email_id
+
+        # Check if email is already taken
+        existing_user = UserRepository.get_user_by_email(db, new_email)
+        if existing_user and existing_user.user_id != user_id:
+            collector_logger.error(f"Change email failed: Email {new_email} is already in use.")
+            raise UserAlreadyExistsException("Email is already registered by another account")
+
+        # Update user's email and set to unverified
+        UserRepository.update_user(db, user, {"email_id": new_email, "is_verified": False})
+
+        # Generate new verification token
+        raw_verification_token = generate_verification_token()
+        token_hash = hash_token_string(raw_verification_token)
+        expires_at = get_ist_now() + timedelta(hours=24)
+
+        VerificationTokenRepository.create_verification_token(
+            db=db,
+            user_id=user.user_id,
+            email_id=new_email,
+            token_hash=token_hash,
+            purpose=TokenPurpose.EMAIL_VERIFICATION,
+            expires_at=expires_at,
+        )
+
+        # Construct verification URL
+        verification_url = f"{base_url}/api/v1/users/verify-email?token={raw_verification_token}"
+
+        # Dispatch email asynchronously
+        background_tasks.add_task(
+            EmailService.send_verification_email,
+            email_to=new_email,
+            username=user.first_name,
+            verification_url=verification_url,
+        )
+        collector_logger.info(f"Verification email sent to new email: {new_email}")

@@ -1,5 +1,5 @@
 import random
-from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator, model_validator
 
 from application.core.config import settings
 
@@ -80,3 +80,34 @@ class ResetPasswordRequest(BaseModel):
         if not any(char in "!@#$%^&*()_+-=[]{}|;:'\",.<>?/`~" for char in v):
             raise ValueError("Password must contain at least one special character")
         return v
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+    confirm_new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        if not any(char.isupper() for char in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(char.islower() for char in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(char.isdigit() for char in v):
+            raise ValueError("Password must contain at least one number")
+        if not any(char in "!@#$%^&*()_+-=[]{}|;:'\",.<>?/`~" for char in v):
+            raise ValueError("Password must contain at least one special character")
+        return v
+
+    @model_validator(mode="after")
+    def check_passwords_match(self) -> "ChangePasswordRequest":
+        if self.new_password != self.confirm_new_password:
+            raise ValueError("New password and confirm new password do not match")
+        return self
+
+
+class ChangeEmailRequest(BaseModel):
+    new_email_id: EmailStr
