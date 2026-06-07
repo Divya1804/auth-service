@@ -9,7 +9,9 @@ from application.repositories.refresh_token_repo import RefreshTokenRepository
 from application.repositories.verification_token_repo import VerificationTokenRepository
 from application.models.verification_tokens import TokenPurpose
 from application.models.users import UserStatus
-from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserResponse, Token, UserBase
+from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserResponse, Token, UserBase, ForgotPasswordRequest, ResetPasswordRequest
+from fastapi import BackgroundTasks
+from application.utils.email import EmailService
 from application.utils.security import (
     get_password_hash,
     verify_password,
@@ -313,3 +315,65 @@ class UserService:
 
         collector_logger.info(f"User profile updated successfully: {updated_user.email_id}")
         return updated_user
+
+    @staticmethod
+    def forgot_password(db: Session, request: ForgotPasswordRequest, background_tasks: BackgroundTasks):
+        user = UserRepository.get_user_by_email(db, request.email_id)
+        if not user:
+            # We don't throw an error to prevent email enumeration, just return
+            collector_logger.info(f"Forgot password requested for non-existent email: {request.email_id}")
+            return
+
+        raw_reset_token = generate_verification_token()
+        token_hash = hash_token_string(raw_reset_token)
+        expires_at = get_ist_now() + timedelta(minutes=15)  # Short expiry for password reset
+
+        VerificationTokenRepository.create_verification_token(
+            db=db,
+            user_id=user.user_id,
+            email_id=user.email_id,
+            token_hash=token_hash,
+            purpose=TokenPurpose.FORGOT_PASSWORD,
+            expires_at=expires_at,
+        )
+
+        # Dispatch email asynchronously
+        background_tasks.add_task(
+            EmailService.send_password_reset_email,
+            email_to=user.email_id,
+            username=user.first_name,
+            reset_token=raw_reset_token,
+        )
+        collector_logger.info(f"Password reset token generated for user: {user.email_id}")
+
+    @staticmethod
+    def reset_password(db: Session, request: ResetPasswordRequest):
+        token_hash = hash_token_string(request.token)
+
+        # Verify token exists and is valid
+        db_token = VerificationTokenRepository.get_token_by_hash(db, token_hash, TokenPurpose.FORGOT_PASSWORD)
+
+        if not db_token or db_token.purpose != TokenPurpose.FORGOT_PASSWORD:
+            collector_logger.error("Password reset failed: Invalid or missing token")
+            raise BadRequestException("Invalid or expired reset token")
+
+        if db_token.expires_at < get_ist_now():
+            VerificationTokenRepository.delete_token(db, db_token.id)
+            collector_logger.error(f"Password reset failed: Expired token for email {db_token.email_id}")
+            raise BadRequestException("Invalid or expired reset token")
+
+        user = UserRepository.get_user_by_id(db, db_token.user_id)
+        if not user:
+            raise UserNotFoundException("User not found")
+
+        # Update password
+        new_password_hash = get_password_hash(request.new_password)
+        UserRepository.update_user(db, user, {"password": new_password_hash})
+
+        # Delete the verification token after successful use
+        VerificationTokenRepository.delete_token(db, db_token.id)
+
+        # Revoke all active refresh tokens for security
+        RefreshTokenRepository.revoke_all_user_tokens(db, user.user_id)
+
+        collector_logger.info(f"Password reset successfully for user: {user.email_id}. All sessions revoked.")
