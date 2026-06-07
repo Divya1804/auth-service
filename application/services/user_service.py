@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 
 from application.repositories.user_repo import UserRepository
 from application.repositories.refresh_token_repo import RefreshTokenRepository
+from application.repositories.verification_token_repo import VerificationTokenRepository
+from application.models.verification_tokens import TokenPurpose
+from application.models.users import UserStatus
 from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserResponse, Token, UserBase
 from application.utils.security import (
     get_password_hash,
@@ -13,12 +16,14 @@ from application.utils.security import (
     create_access_token,
     create_refresh_token,
     hash_token_string,
+    generate_verification_token,
 )
 from application.core.exceptions import (
     UserAlreadyExistsException,
     InvalidCredentialsException,
     UserNotFoundException,
     UnauthorizedUserException,
+    BadRequestException,
 )
 from application.utils.logger import collector_logger
 from application.core.config import settings
@@ -70,7 +75,7 @@ class UserService:
         device_name: str | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
-    ) -> tuple[UserResponse, str]:
+    ) -> tuple[UserResponse, str, str]:
         # 1. Check for email duplication
         if UserRepository.get_user_by_email(db, email=user_in.email_id):
             collector_logger.error(f"Registration failed: Email {user_in.email_id} already exists.")
@@ -84,7 +89,7 @@ class UserService:
         # 3. Hash password
         user_in.password = get_password_hash(user_in.password)
 
-        # 4. Save to DB
+        # 4. Save to DB (Defaults to status = INACTIVE, is_verified = False)
         new_user = UserRepository.create_user(db, user_in=user_in)
         collector_logger.info(f"User successfully registered: {new_user.email_id}")
 
@@ -98,11 +103,25 @@ class UserService:
             user_agent=user_agent,
         )
 
-        # 6. Format Response
+        # 6. Generate Verification Token
+        raw_verification_token = generate_verification_token()
+        token_hash = hash_token_string(raw_verification_token)
+        expires_at = get_ist_now() + timedelta(hours=24)  # Token valid for 24 hours
+
+        VerificationTokenRepository.create_verification_token(
+            db=db,
+            user_id=new_user.user_id,
+            email_id=new_user.email_id,
+            token_hash=token_hash,
+            purpose=TokenPurpose.EMAIL_VERIFICATION,
+            expires_at=expires_at,
+        )
+
+        # 7. Format Response
         base_user = UserBase.model_validate(new_user)
         response = UserResponse(**base_user.model_dump(), tokens=token)
 
-        return response, refresh_token_str
+        return response, refresh_token_str, raw_verification_token
 
     @staticmethod
     def authenticate_user(
@@ -139,6 +158,37 @@ class UserService:
 
         collector_logger.info(f"User logged in successfully: {user.email_id}")
         return response, refresh_token_str
+
+    @staticmethod
+    def verify_user_email(db: Session, token_str: str) -> None:
+        token_hash = hash_token_string(token_str)
+        db_token = VerificationTokenRepository.get_token_by_hash(
+            db, token_hash=token_hash, purpose=TokenPurpose.EMAIL_VERIFICATION
+        )
+
+        if not db_token:
+            collector_logger.error("Email verification failed: Token not found.")
+            raise BadRequestException("Invalid or expired verification token")
+
+        # Check expiration
+        if db_token.expires_at < get_ist_now():
+            collector_logger.warning(f"Email verification failed: Token {db_token.id} has expired.")
+            # Cleanup expired token
+            VerificationTokenRepository.delete_token(db, db_token.id)
+            raise BadRequestException("Verification token has expired")
+
+        # Fetch User
+        user = UserRepository.get_user_by_id(db, user_id=db_token.user_id)
+        if not user:
+            collector_logger.error(f"Verification token valid but user {db_token.user_id} not found.")
+            raise UserNotFoundException()
+
+        # Update User status
+        UserRepository.update_user(db, user, {"is_verified": True, "status": UserStatus.ACTIVE})
+
+        # Cleanup verification token
+        VerificationTokenRepository.delete_token(db, db_token.id)
+        collector_logger.info(f"User email verified and activated: {user.email_id}")
 
     @staticmethod
     def rotate_refresh_token(
