@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request, Response, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from application.db.dependencies import get_db
-from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserBase, ForgotPasswordRequest, ResetPasswordRequest
+from application.schemas.users import UserCreate, UserLogin, UserUpdate, UserBase, ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest, ChangeEmailRequest
 from application.services.user_service import UserService
 from application.utils.response import success_response
 from application.api.dependencies import get_current_user
@@ -130,3 +130,16 @@ def forgot_password(request: ForgotPasswordRequest, background_tasks: Background
 def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
     UserService.reset_password(db, request)
     return success_response(200, "Password reset successfully. You can now log in with your new password.")
+
+
+@router.post("/change-password")
+def change_password(request: ChangePasswordRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    UserService.change_password(db, current_user.user_id, request)
+    return success_response(200, "Password changed successfully. All other sessions have been logged out.")
+
+
+@router.post("/change-email")
+def change_email(request: Request, email_request: ChangeEmailRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    base_url = str(request.base_url).rstrip("/")
+    UserService.change_email(db, current_user.user_id, email_request, background_tasks, base_url)
+    return success_response(200, "Email updated successfully. Please check your new email to verify it.")
