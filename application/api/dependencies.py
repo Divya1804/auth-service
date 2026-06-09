@@ -1,11 +1,11 @@
 from uuid import UUID
 import jwt
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from application.core.config import settings
-from application.core.exceptions import UnauthorizedUserException, UserNotFoundException
+from application.core.exceptions import UnauthorizedUserException, UserNotFoundException, BadRequestException
 from application.db.dependencies import get_db
 from application.repositories.user_repo import UserRepository
 from application.models.users import User
@@ -45,3 +45,22 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
     collector_logger.info(f"User authenticated successfully via token: {user.email_id}")
     return user
+
+
+def get_current_tenant(request: Request, current_user: User = Depends(get_current_user)) -> UUID:
+    tenant_id_str = request.headers.get("x-tenant-id")
+
+    if not tenant_id_str:
+        if current_user.default_tenant:
+            return current_user.default_tenant
+        raise BadRequestException("x-tenant-id header is required")
+
+    try:
+        tenant_id = UUID(tenant_id_str)
+    except ValueError:
+        raise BadRequestException("Invalid x-tenant-id format")
+
+    if str(tenant_id) not in current_user.tenant_lists:
+        raise UnauthorizedUserException("You do not have access to this tenant")
+
+    return tenant_id

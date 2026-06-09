@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 
 from application.db.session import Base, engine
 from application.api.user_routes import router as users_router
+from application.api.tenant_routes import router as tenants_router
 from application.core.exceptions import AppException
 from application.utils.response import error_response
 
@@ -22,6 +23,7 @@ async def app_exception_handler(request: Request, exc: AppException):
 
 
 app.include_router(users_router, prefix="/api/v1", tags=["Users API"])
+app.include_router(tenants_router, prefix="/api/v1", tags=["Tenants API"])
 
 
 @app.get("/health")
