@@ -26,4 +26,4 @@ def get_logger(service_name: str) -> logging.Logger:
     return logger
 
 
-collector_logger = get_logger("collector_service")
+auth_logger = get_logger("auth_service")

@@ -5,9 +5,12 @@ from sqlalchemy.orm import Session
 
 from application.repositories.tenant_repo import TenantRepository
 from application.repositories.user_repo import UserRepository
+from application.repositories.role_repo import RoleRepository
+from application.repositories.tenant_member_repo import TenantMemberRepository
+from application.models.tenant_members import TenantMemberStatus
 from application.schemas.tenants import TenantCreate, TenantUpdate, TenantResponse
 from application.core.exceptions import BadRequestException
-from application.utils.logger import collector_logger
+from application.utils.logger import auth_logger
 
 
 class TenantService:
@@ -45,6 +48,11 @@ class TenantService:
         # Create tenant
         tenant = TenantRepository.create_tenant(db, tenant_data)
 
+        # Assign Owner Role to Creator
+        owner_role = RoleRepository.get_role_by_name(db, "Owner")
+        if owner_role:
+            TenantMemberRepository.create_member(db=db, tenant_id=tenant.id, user_id=user_id, role_ids=[owner_role.id], status=TenantMemberStatus.ACTIVE)
+
         # Update User
         # JSON type returns a list, but assigning requires creating a new list object for SQLAlchemy to detect change
         updated_tenant_lists = list(user.tenant_lists) if user.tenant_lists else []
@@ -56,7 +64,7 @@ class TenantService:
 
         UserRepository.update_user(db, user, update_data)
 
-        collector_logger.info(f"Tenant {short_code} created successfully by user {user_id}")
+        auth_logger.info(f"Tenant {short_code} created successfully by user {user_id} with Owner role.")
         return TenantResponse.model_validate(tenant)
 
     @staticmethod
@@ -101,7 +109,7 @@ class TenantService:
             raise BadRequestException("Unauthorized access to tenant")
 
         TenantRepository.soft_delete_tenant(db, tenant)
-        collector_logger.info(f"Tenant {tenant_id} soft deleted by user {user_id}")
+        auth_logger.info(f"Tenant {tenant_id} soft deleted by user {user_id}")
 
         user = UserRepository.get_user_by_id(db, user_id)
         if user:

@@ -3,7 +3,7 @@ from application.core.config import settings
 
 from pydantic import EmailStr
 
-from application.utils.logger import collector_logger
+from application.utils.logger import auth_logger
 from application.utils.time_ist import get_ist_now
 
 
@@ -18,9 +18,9 @@ class EmailService:
                 "html": html_content,
             }
             response = resend.Emails.send(params)
-            collector_logger.info(f"Email successfully sent to {to_email}. ID: {response.get('id')}")
+            auth_logger.info(f"Email successfully sent to {to_email}. ID: {response.get('id')}")
         except Exception as e:
-            collector_logger.error(f"Failed to send email to {to_email}: {e!s}")
+            auth_logger.error(f"Failed to send email to {to_email}: {e!s}")
 
     @classmethod
     def send_verification_email(cls, email_to: EmailStr, username: str, verification_url: str):

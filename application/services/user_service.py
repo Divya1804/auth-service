@@ -27,7 +27,7 @@ from application.core.exceptions import (
     UnauthorizedUserException,
     BadRequestException,
 )
-from application.utils.logger import collector_logger
+from application.utils.logger import auth_logger
 from application.core.config import settings
 from application.utils.time_ist import get_ist_now
 
@@ -80,12 +80,12 @@ class UserService:
     ) -> tuple[UserResponse, str, str]:
         # 1. Check for email duplication
         if UserRepository.get_user_by_email(db, email=user_in.email_id):
-            collector_logger.error(f"Registration failed: Email {user_in.email_id} already exists.")
+            auth_logger.error(f"Registration failed: Email {user_in.email_id} already exists.")
             raise UserAlreadyExistsException("User already exists with this email id")
 
         # 2. Check for username duplication
         if UserRepository.get_user_by_username(db, username=user_in.username):
-            collector_logger.error(f"Registration failed: Username {user_in.username} already exists.")
+            auth_logger.error(f"Registration failed: Username {user_in.username} already exists.")
             raise UserAlreadyExistsException("User already exists with this username")
 
         # 3. Hash password
@@ -93,7 +93,7 @@ class UserService:
 
         # 4. Save to DB (Defaults to status = INACTIVE, is_verified = False)
         new_user = UserRepository.create_user(db, user_in=user_in)
-        collector_logger.info(f"User successfully registered: {new_user.email_id}")
+        auth_logger.info(f"User successfully registered: {new_user.email_id}")
 
         # 5. Generate Access & Refresh Tokens
         token, refresh_token_str = UserService._create_token_pair(
@@ -136,12 +136,12 @@ class UserService:
         # 1. Look up user by email
         user = UserRepository.get_user_by_email(db, email=user_login.email_id)
         if not user:
-            collector_logger.error(f"Login failed: User with email {user_login.email_id} not found.")
+            auth_logger.error(f"Login failed: User with email {user_login.email_id} not found.")
             raise InvalidCredentialsException("Invalid email or password")
 
         # 2. Verify password hash
         if not verify_password(user_login.password, user.password):
-            collector_logger.error(f"Login failed: Incorrect password for email {user_login.email_id}.")
+            auth_logger.error(f"Login failed: Incorrect password for email {user_login.email_id}.")
             raise InvalidCredentialsException("Invalid email or password")
 
         # 3. Generate Access & Refresh Tokens
@@ -158,7 +158,7 @@ class UserService:
         base_user = UserBase.model_validate(user)
         response = UserResponse(**base_user.model_dump(), tokens=token)
 
-        collector_logger.info(f"User logged in successfully: {user.email_id}")
+        auth_logger.info(f"User logged in successfully: {user.email_id}")
         return response, refresh_token_str
 
     @staticmethod
@@ -167,12 +167,12 @@ class UserService:
         db_token = VerificationTokenRepository.get_token_by_hash(db, token_hash=token_hash, purpose=TokenPurpose.EMAIL_VERIFICATION)
 
         if not db_token:
-            collector_logger.error("Email verification failed: Token not found.")
+            auth_logger.error("Email verification failed: Token not found.")
             raise BadRequestException("Invalid or expired verification token")
 
         # Check expiration
         if db_token.expires_at < get_ist_now():
-            collector_logger.warning(f"Email verification failed: Token {db_token.id} has expired.")
+            auth_logger.warning(f"Email verification failed: Token {db_token.id} has expired.")
             # Cleanup expired token
             VerificationTokenRepository.delete_token(db, db_token.id)
             raise BadRequestException("Verification token has expired")
@@ -180,7 +180,7 @@ class UserService:
         # Fetch User
         user = UserRepository.get_user_by_id(db, user_id=db_token.user_id)
         if not user:
-            collector_logger.error(f"Verification token valid but user {db_token.user_id} not found.")
+            auth_logger.error(f"Verification token valid but user {db_token.user_id} not found.")
             raise UserNotFoundException()
 
         # Update User status
@@ -188,7 +188,7 @@ class UserService:
 
         # Cleanup verification token
         VerificationTokenRepository.delete_token(db, db_token.id)
-        collector_logger.info(f"User email verified and activated: {user.email_id}")
+        auth_logger.info(f"User email verified and activated: {user.email_id}")
 
     @staticmethod
     def rotate_refresh_token(
@@ -203,45 +203,45 @@ class UserService:
 
             token_type = payload.get("type")
             if token_type != "refresh":
-                collector_logger.error("Attempted token refresh with non-refresh token.")
+                auth_logger.error("Attempted token refresh with non-refresh token.")
                 raise UnauthorizedUserException("Invalid token type")
 
             token_id_str = payload.get("jti")
             user_id_str = payload.get("sub")
             if not token_id_str or not user_id_str:
-                collector_logger.error("Token payload missing required fields.")
+                auth_logger.error("Token payload missing required fields.")
                 raise UnauthorizedUserException("Invalid token payload")
 
             token_id = uuid.UUID(token_id_str)
             user_id = uuid.UUID(user_id_str)
 
         except jwt.ExpiredSignatureError:
-            collector_logger.warning("Attempted refresh with expired token.")
+            auth_logger.warning("Attempted refresh with expired token.")
             raise UnauthorizedUserException(message="Token expired", error_message="Token has expired")
         except (jwt.InvalidTokenError, ValueError) as e:
-            collector_logger.warning(f"Attempted refresh with invalid token: {e}")
+            auth_logger.warning(f"Attempted refresh with invalid token: {e}")
             raise UnauthorizedUserException(message="Invalid token", error_message="Invalid token structure")
 
         # Fetch db token
         db_token = RefreshTokenRepository.get_token_by_id(db, token_id)
         if not db_token:
-            collector_logger.error(f"Refresh token {token_id} not found in database.")
+            auth_logger.error(f"Refresh token {token_id} not found in database.")
             raise UnauthorizedUserException(message="Invalid token", error_message="Refresh token not found")
 
         # Hash check
         current_hash = hash_token_string(refresh_token_str)
         if db_token.token_hash != current_hash:
-            collector_logger.error("Refresh token hash mismatch.")
+            auth_logger.error("Refresh token hash mismatch.")
             raise UnauthorizedUserException(message="Invalid token", error_message="Token signature mismatch")
 
         # Check expiration
         if db_token.expires_at < get_ist_now():
-            collector_logger.warning(f"Refresh token {token_id} has expired in database.")
+            auth_logger.warning(f"Refresh token {token_id} has expired in database.")
             raise UnauthorizedUserException(message="Token expired", error_message="Token has expired")
 
         # Replay Attack Detection
         if db_token.revoked_at is not None or db_token.last_used_at is not None:
-            collector_logger.warning(f"Replay attack detected for token {token_id}! Revoking all active sessions for user {user_id}.")
+            auth_logger.warning(f"Replay attack detected for token {token_id}! Revoking all active sessions for user {user_id}.")
             # Revoke all active sessions
             RefreshTokenRepository.revoke_all_user_tokens(db, user_id=user_id)
             raise UnauthorizedUserException(message="Session terminated", error_message="Replay attack detected. Please log in again.")
@@ -249,7 +249,7 @@ class UserService:
         # Retrieve User
         user = UserRepository.get_user_by_id(db, user_id=user_id)
         if not user:
-            collector_logger.error(f"Refresh token valid but user {user_id} not found.")
+            auth_logger.error(f"Refresh token valid but user {user_id} not found.")
             raise UserNotFoundException()
 
         # Update current token (marks as used and revoked)
@@ -272,7 +272,7 @@ class UserService:
         base_user = UserBase.model_validate(user)
         response = UserResponse(**base_user.model_dump(), tokens=token)
 
-        collector_logger.info(f"Successfully rotated refresh token for user: {user.email_id}")
+        auth_logger.info(f"Successfully rotated refresh token for user: {user.email_id}")
         return response, new_refresh_token_str
 
     @staticmethod
@@ -284,36 +284,36 @@ class UserService:
                 raise UnauthorizedUserException("Invalid token payload")
             token_id = uuid.UUID(token_id_str)
         except (jwt.InvalidTokenError, ValueError) as e:
-            collector_logger.warning(f"Attempted logout with invalid token: {e}")
+            auth_logger.warning(f"Attempted logout with invalid token: {e}")
             raise UnauthorizedUserException(message="Invalid token", error_message="Token parsing failed")
 
         db_token = RefreshTokenRepository.get_token_by_id(db, token_id)
         if not db_token:
-            collector_logger.warning(f"Logout token {token_id} not found in DB.")
+            auth_logger.warning(f"Logout token {token_id} not found in DB.")
             return
 
         # Hash check
         current_hash = hash_token_string(refresh_token_str)
         if db_token.token_hash != current_hash:
-            collector_logger.error("Logout token hash mismatch.")
+            auth_logger.error("Logout token hash mismatch.")
             raise UnauthorizedUserException(message="Invalid token", error_message="Token signature mismatch")
 
         # Mark as revoked
         RefreshTokenRepository.revoke_token(db, token_id)
-        collector_logger.info(f"Successfully revoked refresh token: {token_id} for user {db_token.user_id}")
+        auth_logger.info(f"Successfully revoked refresh token: {token_id} for user {db_token.user_id}")
 
     @staticmethod
     def update_user_profile(db: Session, user_id: UUID, user_update: UserUpdate):
         db_user = UserRepository.get_user_by_id(db, user_id)
         if not db_user:
-            collector_logger.error(f"Profile update failed: User {user_id} not found.")
+            auth_logger.error(f"Profile update failed: User {user_id} not found.")
             raise UserNotFoundException()
 
         # exclude_unset=True ensures we only update fields that were actually provided in the request
         update_data = user_update.model_dump(exclude_unset=True)
         updated_user = UserRepository.update_user(db, db_user, update_data)
 
-        collector_logger.info(f"User profile updated successfully: {updated_user.email_id}")
+        auth_logger.info(f"User profile updated successfully: {updated_user.email_id}")
         return updated_user
 
     @staticmethod
@@ -321,7 +321,7 @@ class UserService:
         user = UserRepository.get_user_by_email(db, request.email_id)
         if not user:
             # We don't throw an error to prevent email enumeration, just return
-            collector_logger.info(f"Forgot password requested for non-existent email: {request.email_id}")
+            auth_logger.info(f"Forgot password requested for non-existent email: {request.email_id}")
             return
 
         raw_reset_token = generate_verification_token()
@@ -344,7 +344,7 @@ class UserService:
             username=user.first_name,
             reset_token=raw_reset_token,
         )
-        collector_logger.info(f"Password reset token generated for user: {user.email_id}")
+        auth_logger.info(f"Password reset token generated for user: {user.email_id}")
 
     @staticmethod
     def reset_password(db: Session, request: ResetPasswordRequest):
@@ -354,12 +354,12 @@ class UserService:
         db_token = VerificationTokenRepository.get_token_by_hash(db, token_hash, TokenPurpose.FORGOT_PASSWORD)
 
         if not db_token or db_token.purpose != TokenPurpose.FORGOT_PASSWORD:
-            collector_logger.error("Password reset failed: Invalid or missing token")
+            auth_logger.error("Password reset failed: Invalid or missing token")
             raise BadRequestException("Invalid or expired reset token")
 
         if db_token.expires_at < get_ist_now():
             VerificationTokenRepository.delete_token(db, db_token.id)
-            collector_logger.error(f"Password reset failed: Expired token for email {db_token.email_id}")
+            auth_logger.error(f"Password reset failed: Expired token for email {db_token.email_id}")
             raise BadRequestException("Invalid or expired reset token")
 
         user = UserRepository.get_user_by_id(db, db_token.user_id)
@@ -376,7 +376,7 @@ class UserService:
         # Revoke all active refresh tokens for security
         RefreshTokenRepository.revoke_all_user_tokens(db, user.user_id)
 
-        collector_logger.info(f"Password reset successfully for user: {user.email_id}. All sessions revoked.")
+        auth_logger.info(f"Password reset successfully for user: {user.email_id}. All sessions revoked.")
 
     @staticmethod
     def change_password(db: Session, user_id: UUID, request: ChangePasswordRequest):
@@ -386,7 +386,7 @@ class UserService:
 
         # Verify old password
         if not verify_password(request.old_password, user.password):
-            collector_logger.error(f"Change password failed: Incorrect old password for {user.email_id}.")
+            auth_logger.error(f"Change password failed: Incorrect old password for {user.email_id}.")
             raise InvalidCredentialsException("Incorrect old password")
 
         # if request.new_password != request.confirm_new_password:
@@ -400,7 +400,7 @@ class UserService:
         # Revoke all active refresh tokens for security
         RefreshTokenRepository.revoke_all_user_tokens(db, user.user_id)
 
-        collector_logger.info(f"Password changed successfully for user: {user.email_id}. All sessions revoked.")
+        auth_logger.info(f"Password changed successfully for user: {user.email_id}. All sessions revoked.")
 
     @staticmethod
     def change_email(db: Session, user_id: UUID, request: ChangeEmailRequest, background_tasks: BackgroundTasks, base_url: str):
@@ -413,7 +413,7 @@ class UserService:
         # Check if email is already taken
         existing_user = UserRepository.get_user_by_email(db, new_email)
         if existing_user and existing_user.user_id != user_id:
-            collector_logger.error(f"Change email failed: Email {new_email} is already in use.")
+            auth_logger.error(f"Change email failed: Email {new_email} is already in use.")
             raise UserAlreadyExistsException("Email is already registered by another account")
 
         # Update user's email and set to unverified
@@ -443,4 +443,4 @@ class UserService:
             username=user.first_name,
             verification_url=verification_url,
         )
-        collector_logger.info(f"Verification email sent to new email: {new_email}")
+        auth_logger.info(f"Verification email sent to new email: {new_email}")
