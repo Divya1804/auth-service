@@ -19,12 +19,12 @@ class TenantRepository:
 
     @staticmethod
     def get_tenant_by_id(db: Session, tenant_id: UUID) -> Tenant | None:
-        stmt = select(Tenant).where(and_(Tenant.id == tenant_id, not Tenant.is_deleted))
+        stmt = select(Tenant).where(and_(Tenant.id == tenant_id, Tenant.is_deleted == False))
         return db.execute(stmt).scalars().first()
 
     @staticmethod
     def get_tenant_by_short_code(db: Session, short_code: str) -> Tenant | None:
-        stmt = select(Tenant).where(and_(Tenant.short_code == short_code, not Tenant.is_deleted))
+        stmt = select(Tenant).where(and_(Tenant.short_code == short_code, Tenant.is_deleted == False))
         return db.execute(stmt).scalars().first()
 
     @staticmethod
@@ -34,7 +34,14 @@ class TenantRepository:
 
     @staticmethod
     def get_tenants_by_owner(db: Session, owner_user_id: UUID) -> list[Tenant]:
-        stmt = select(Tenant).where(and_(Tenant.owner_user_id == owner_user_id, not Tenant.is_deleted))
+        stmt = select(Tenant).where(and_(Tenant.owner_user_id == owner_user_id, Tenant.is_deleted == False))
+        return list(db.execute(stmt).scalars().all())
+
+    @staticmethod
+    def get_tenants_by_ids(db: Session, tenant_ids: list[UUID]) -> list[Tenant]:
+        if not tenant_ids:
+            return []
+        stmt = select(Tenant).where(and_(Tenant.id.in_(tenant_ids), Tenant.is_deleted == False))
         return list(db.execute(stmt).scalars().all())
 
     @staticmethod

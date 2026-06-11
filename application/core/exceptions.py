@@ -31,3 +31,8 @@ class BadRequestException(AppException):
 class UnauthorizedUserException(AppException):
     def __init__(self, message: str = "Unauthenticated User", error_message: str = "User is not authenticated"):
         super().__init__(status_code=401, message=message, error_code="UNAUTHORIZED_USER", error_message=error_message)
+
+
+class ForbiddenException(AppException):
+    def __init__(self, message: str = "Forbidden", error_message: str = "You do not have permission to access this resource"):
+        super().__init__(status_code=403, message=message, error_code="FORBIDDEN", error_message=error_message)

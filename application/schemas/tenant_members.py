@@ -13,3 +13,7 @@ class TenantMemberResponse(BaseModel):
     joined_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UpdateMemberRolesRequest(BaseModel):
+    role_ids: list[UUID]

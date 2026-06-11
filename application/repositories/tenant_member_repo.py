@@ -41,6 +41,13 @@ class TenantMemberRepository:
         return member
 
     @staticmethod
+    def update_member_roles(db: Session, member: TenantMember, role_ids: list[UUID]) -> TenantMember:
+        member.role_ids = [str(r) for r in role_ids]
+        db.commit()
+        db.refresh(member)
+        return member
+
+    @staticmethod
     def remove_member(db: Session, tenant_id: UUID, user_id: UUID) -> bool:
         member = TenantMemberRepository.get_member(db, tenant_id, user_id)
         if member:

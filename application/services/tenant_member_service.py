@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from application.repositories.tenant_invite_repo import TenantInviteRepository
 from application.repositories.tenant_member_repo import TenantMemberRepository
 from application.repositories.user_repo import UserRepository
+from application.repositories.role_repo import RoleRepository
 from application.schemas.tenant_invites import TenantInviteCreate, TenantInviteResponse, AcceptInviteRequest
 from application.schemas.tenant_members import TenantMemberResponse
 from application.models.tenant_invites import InviteStatus
@@ -96,3 +97,68 @@ class TenantMemberService:
     def get_tenant_invites(db: Session, tenant_id: UUID) -> list[TenantInviteResponse]:
         invites = TenantInviteRepository.get_invites_for_tenant(db, tenant_id)
         return [TenantInviteResponse.model_validate(i) for i in invites]
+
+    @staticmethod
+    def update_member_roles(db: Session, tenant_id: UUID, user_id: UUID, role_ids: list[UUID]) -> TenantMemberResponse:
+        member = TenantMemberRepository.get_member(db, tenant_id, user_id)
+        if not member:
+            raise BadRequestException("User is not a member of this tenant")
+
+        updated_member = TenantMemberRepository.update_member_roles(db, member, role_ids)
+        auth_logger.info(f"Updated roles for user {user_id} in tenant {tenant_id}")
+        return TenantMemberResponse.model_validate(updated_member)
+
+    @staticmethod
+    def remove_member(db: Session, tenant_id: UUID, user_id: UUID) -> dict:
+        member = TenantMemberRepository.get_member(db, tenant_id, user_id)
+        if not member:
+            raise BadRequestException("User is not a member of this tenant")
+
+        TenantMemberRepository.remove_member(db, tenant_id, user_id)
+
+        user = UserRepository.get_user_by_id(db, user_id)
+        if user and user.tenant_lists:
+            updated_list = [t for t in user.tenant_lists if t != str(tenant_id)]
+            update_data = {"tenant_lists": updated_list}
+
+            if user.default_tenant == tenant_id:
+                update_data["default_tenant"] = UUID(updated_list[0]) if updated_list else None
+
+            UserRepository.update_user(db, user, update_data)
+
+        auth_logger.info(f"Removed user {user_id} from tenant {tenant_id}")
+        return {"message": "Member removed successfully"}
+
+    @staticmethod
+    def cancel_invite(db: Session, tenant_id: UUID, invite_id: UUID) -> dict:
+        from application.models.tenant_invites import TenantInvite
+        from sqlalchemy import select, and_
+
+        stmt = select(TenantInvite).where(and_(TenantInvite.id == invite_id, TenantInvite.tenant_id == tenant_id))
+        invite = db.execute(stmt).scalars().first()
+
+        if not invite:
+            raise BadRequestException("Invite not found")
+
+        if invite.status != InviteStatus.PENDING:
+            raise BadRequestException("Only pending invites can be cancelled")
+
+        TenantInviteRepository.update_invite_status(db, invite_id, InviteStatus.EXPIRED)
+        auth_logger.info(f"Invite {invite_id} cancelled for tenant {tenant_id}")
+        return {"message": "Invite cancelled successfully"}
+
+    @staticmethod
+    def leave_tenant(db: Session, tenant_id: UUID, user_id: UUID) -> dict:
+        member = TenantMemberRepository.get_member(db, tenant_id, user_id)
+        if not member:
+            raise BadRequestException("You are not a member of this tenant")
+
+        # Check if user is the sole owner
+        owner_role = RoleRepository.get_role_by_name(db, "Owner")
+        if owner_role and str(owner_role.id) in member.role_ids:
+            all_members = TenantMemberRepository.get_members_by_tenant(db, tenant_id)
+            owners = [m for m in all_members if str(owner_role.id) in m.role_ids and m.user_id != user_id]
+            if not owners:
+                raise BadRequestException("You are the only Owner. You must assign another Owner or delete the tenant before leaving.")
+
+        return TenantMemberService.remove_member(db, tenant_id, user_id)
